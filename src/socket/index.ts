@@ -45,8 +45,8 @@ export function initializeSocket(httpServer: HttpServer): SocketIOServer<
       methods: ['GET', 'POST'],
     },
     maxHttpBufferSize: 1e6, // 1MB buffer cap to prevent memory exhaustion
-    pingTimeout: 20000,
-    pingInterval: 10000,
+    pingTimeout: 5000,
+    pingInterval: 3000,
     transports: ['websocket', 'polling'],
   });
 
@@ -468,8 +468,14 @@ export function initializeSocket(httpServer: HttpServer): SocketIOServer<
     });
 
     /**
-     * Disconnect Event
+     * Disconnect Events (Instant Member & Room Cleanup)
      */
+    socket.on('disconnecting', () => {
+      messageFloodLimiter.reset(socket.id);
+      signalingFloodLimiter.reset(socket.id);
+      handleSocketLeave(socket, io);
+    });
+
     socket.on('disconnect', () => {
       messageFloodLimiter.reset(socket.id);
       signalingFloodLimiter.reset(socket.id);
