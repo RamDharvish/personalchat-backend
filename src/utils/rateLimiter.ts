@@ -119,8 +119,8 @@ export class BruteForceProtection {
 // 5 messages per 2 seconds
 export const messageFloodLimiter = new SlidingWindowLimiter(5, 2000);
 
-// 40 signaling packets per 5 seconds
-export const signalingFloodLimiter = new SlidingWindowLimiter(40, 5000);
+// 500 signaling packets per 5 seconds (prevents dropping burst trickle ICE candidates during call establishment)
+export const signalingFloodLimiter = new SlidingWindowLimiter(500, 5000);
 
 // 5 failed room code attempts triggers a 60s lockout
 export const joinBruteForceProtection = new BruteForceProtection(5, 60000);
