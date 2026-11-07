@@ -260,7 +260,7 @@ export function initializeSocket(httpServer) {
             });
         });
         /**
-         * WebRTC Signaling Events with Rate Limiting
+         * WebRTC Signaling Events with Rate Limiting & Room Isolation
          */
         socket.on('signal:call-start', (payload) => {
             if (signalingFloodLimiter.isRateLimited(socket.id))
@@ -271,29 +271,35 @@ export function initializeSocket(httpServer) {
             const member = room.members.get(socket.id);
             if (!member)
                 return;
+            const callType = payload.callType === 'video' ? 'video' : 'voice';
+            roomManager.startCall(room.internalId, socket.id, callType);
             const roomChannel = `room:${room.internalId}`;
             socket.to(roomChannel).emit('signal:incoming-call', {
                 fromSocketId: socket.id,
                 fromDisplayName: member.displayName,
-                callType: payload.callType === 'video' ? 'video' : 'voice',
+                callType,
             });
         });
-        socket.on('signal:call-accept', (payload) => {
+        socket.on('signal:call-accept', (_payload) => {
             if (signalingFloodLimiter.isRateLimited(socket.id))
                 return;
             const room = roomManager.getRoomBySocketId(socket.id);
             if (!room)
                 return;
-            if (payload?.toSocketId) {
-                io.to(payload.toSocketId).emit('signal:call-accepted', { fromSocketId: socket.id });
-            }
-            else {
-                const roomChannel = `room:${room.internalId}`;
-                socket.to(roomChannel).emit('signal:call-accepted', { fromSocketId: socket.id });
-            }
+            const { activeCall } = roomManager.joinCall(room.internalId, socket.id);
+            const callType = activeCall?.callType || 'voice';
+            // Broadcast to all peers in the room so every participant in the mesh knows this socket joined the call
+            const roomChannel = `room:${room.internalId}`;
+            socket.to(roomChannel).emit('signal:call-accepted', {
+                fromSocketId: socket.id,
+                callType,
+            });
         });
         socket.on('signal:call-reject', (payload) => {
-            if (payload?.toSocketId) {
+            const room = roomManager.getRoomBySocketId(socket.id);
+            if (!room)
+                return;
+            if (payload?.toSocketId && room.members.has(payload.toSocketId)) {
                 io.to(payload.toSocketId).emit('signal:call-rejected', {
                     fromSocketId: socket.id,
                     reason: typeof payload.reason === 'string' ? escapeHtml(payload.reason.slice(0, 100)) : undefined,
@@ -304,6 +310,7 @@ export function initializeSocket(httpServer) {
             const room = roomManager.getRoomBySocketId(socket.id);
             if (!room)
                 return;
+            roomManager.leaveCall(room.internalId, socket.id);
             const roomChannel = `room:${room.internalId}`;
             socket.to(roomChannel).emit('signal:call-ended', { fromSocketId: socket.id });
         });
@@ -312,6 +319,9 @@ export function initializeSocket(httpServer) {
                 return;
             const room = roomManager.getRoomBySocketId(socket.id);
             if (!room || !payload?.toSocketId)
+                return;
+            // Room membership security check: ensure destination socket is in the same room
+            if (!room.members.has(payload.toSocketId))
                 return;
             const member = room.members.get(socket.id);
             if (!member)
@@ -326,7 +336,11 @@ export function initializeSocket(httpServer) {
         socket.on('signal:answer', (payload) => {
             if (signalingFloodLimiter.isRateLimited(socket.id))
                 return;
-            if (!payload?.toSocketId)
+            const room = roomManager.getRoomBySocketId(socket.id);
+            if (!room || !payload?.toSocketId)
+                return;
+            // Room membership security check: ensure destination socket is in the same room
+            if (!room.members.has(payload.toSocketId))
                 return;
             io.to(payload.toSocketId).emit('signal:answer', {
                 fromSocketId: socket.id,
@@ -336,7 +350,11 @@ export function initializeSocket(httpServer) {
         socket.on('signal:ice-candidate', (payload) => {
             if (signalingFloodLimiter.isRateLimited(socket.id))
                 return;
-            if (!payload?.toSocketId)
+            const room = roomManager.getRoomBySocketId(socket.id);
+            if (!room || !payload?.toSocketId)
+                return;
+            // Room membership security check: ensure destination socket is in the same room
+            if (!room.members.has(payload.toSocketId))
                 return;
             io.to(payload.toSocketId).emit('signal:ice-candidate', {
                 fromSocketId: socket.id,

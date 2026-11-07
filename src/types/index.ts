@@ -17,6 +17,13 @@ export interface RoomMember {
   connectionState: ConnectionState;
 }
 
+export interface ActiveCallState {
+  callType: CallType;
+  startedBy: string; // socketId
+  startedAt: number;
+  participants: string[]; // socketIds
+}
+
 export interface Room {
   internalId: string;
   publicCode: string;
@@ -27,6 +34,7 @@ export interface Room {
   isLocked: boolean;
   createdAt: number;
   lastActivityAt: number;
+  activeCall?: ActiveCallState | null;
 }
 
 export interface SanitizedMember {
@@ -44,6 +52,11 @@ export interface RoomInfoResponse {
   isLocked: boolean;
   members: SanitizedMember[];
   selfSocketId: string;
+  activeCall?: {
+    callType: CallType;
+    startedBy: string;
+    participantCount: number;
+  } | null;
 }
 
 export interface HealthResponse {
@@ -232,7 +245,7 @@ export interface ServerToClientEvents {
   'chat:typing': (data: TypingEvent) => void;
   // WebRTC signaling server events
   'signal:incoming-call': (data: SignalIncomingCallEvent) => void;
-  'signal:call-accepted': (data: { fromSocketId: string }) => void;
+  'signal:call-accepted': (data: { fromSocketId: string; callType?: CallType }) => void;
   'signal:call-rejected': (data: { fromSocketId: string; reason?: string }) => void;
   'signal:call-ended': (data: { fromSocketId: string }) => void;
   'signal:offer': (data: SignalOfferEvent) => void;

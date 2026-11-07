@@ -94,6 +94,7 @@ export class RoomManager {
             isLocked: false,
             createdAt: now,
             lastActivityAt: now,
+            activeCall: null,
         };
         this.rooms.set(internalId, room);
         this.codeToId.set(publicCode, internalId);
@@ -108,6 +109,7 @@ export class RoomManager {
                 isLocked: false,
                 members: this.getSanitizedMembers(room),
                 selfSocketId: hostSocketId,
+                activeCall: null,
             },
         };
     }
@@ -172,6 +174,13 @@ export class RoomManager {
                 isLocked: room.isLocked,
                 members: this.getSanitizedMembers(room),
                 selfSocketId: socketId,
+                activeCall: room.activeCall
+                    ? {
+                        callType: room.activeCall.callType,
+                        startedBy: room.activeCall.startedBy,
+                        participantCount: room.activeCall.participants.length,
+                    }
+                    : null,
             },
         };
     }
@@ -190,6 +199,8 @@ export class RoomManager {
         }
         const member = room.members.get(socketId);
         room.members.delete(socketId);
+        // Remove from active call if participating
+        this.leaveCall(internalId, socketId);
         const leavingMember = member
             ? {
                 socketId: member.socketId,
@@ -257,6 +268,60 @@ export class RoomManager {
             isLocked: room.isLocked,
             internalId,
         };
+    }
+    /**
+     * Starts a room-level active call session.
+     */
+    startCall(internalId, socketId, callType) {
+        const room = this.rooms.get(internalId);
+        if (!room)
+            return false;
+        room.activeCall = {
+            callType,
+            startedBy: socketId,
+            startedAt: Date.now(),
+            participants: [socketId],
+        };
+        room.lastActivityAt = Date.now();
+        return true;
+    }
+    /**
+     * Joins an ongoing active call.
+     */
+    joinCall(internalId, socketId) {
+        const room = this.rooms.get(internalId);
+        if (!room || !room.activeCall)
+            return { success: false };
+        if (!room.activeCall.participants.includes(socketId)) {
+            room.activeCall.participants.push(socketId);
+        }
+        room.lastActivityAt = Date.now();
+        return { success: true, activeCall: room.activeCall };
+    }
+    /**
+     * Leaves an active call, ending the call if fewer than 2 participants remain.
+     */
+    leaveCall(internalId, socketId) {
+        const room = this.rooms.get(internalId);
+        if (!room || !room.activeCall) {
+            return { callEnded: false, remainingParticipants: [] };
+        }
+        room.activeCall.participants = room.activeCall.participants.filter((id) => id !== socketId);
+        room.lastActivityAt = Date.now();
+        if (room.activeCall.participants.length < 2) {
+            // If 1 or 0 participants remain, the call is over
+            const remaining = [...room.activeCall.participants];
+            room.activeCall = null;
+            return { callEnded: true, remainingParticipants: remaining };
+        }
+        return { callEnded: false, remainingParticipants: [...room.activeCall.participants] };
+    }
+    /**
+     * Get active call status if any.
+     */
+    getActiveCall(internalId) {
+        const room = this.rooms.get(internalId);
+        return room?.activeCall || null;
     }
     /**
      * Periodic sweep to destroy stale/abandoned rooms.
